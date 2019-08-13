@@ -124,6 +124,8 @@ class RedisZSetRDD[T: ClassTag](prev: RDD[String],
     zsetContext.typ match {
       case "byRange" => getZSetByRange(nodes, keys, zsetContext.startPos, zsetContext.endPos)
       case "byScore" => getZSetByScore(nodes, keys, zsetContext.min, zsetContext.max)
+      case "byRangeWithKey" => getZSetByRangeWithKey(nodes, keys, zsetContext.startPos, zsetContext.endPos)
+      case "byScoreWithKey" => getZSetByScoreWithKey(nodes, keys, zsetContext.min, zsetContext.max)
     }
   }
 
@@ -142,6 +144,53 @@ class RedisZSetRDD[T: ClassTag](prev: RDD[String],
           zsetKeys.flatMap(k => conn.zrange(k, startPos, endPos)).iterator
         } else {
           throw new scala.Exception("Unknown RedisZSetRDD type")
+        }
+      }
+      conn.close()
+      res
+    }.asInstanceOf[Iterator[T]]
+  }
+
+  private def getZSetByRangeWithKey(nodes: Array[RedisNode],
+                                     keys: Iterator[String],
+                                     startPos: Long,
+                                     endPos: Long): Iterator[T] = {
+    groupKeysByNode(nodes, keys).flatMap { case (node, nodeKeys) =>
+      val conn = node.endpoint.connect()
+      val zsetKeys = filterKeysByType(conn, nodeKeys, "zset")
+      val res = {
+        if (classTag[T] == classTag[(String, (String, Double))]) {
+          zsetKeys.
+            map(k => (k, conn.zrangeWithScores(k, startPos, endPos))).
+            flatMap(kv => kv._2.map(v => (kv._1, (v.getElement, v.getScore)))).iterator
+        } else if (classTag[T] == classTag[String]) {
+          zsetKeys.map(k => (k, conn.zrange(k, startPos, endPos))).
+            flatMap(kv => kv._2.map(v => (kv._1, v))).iterator
+        } else {
+          throw new scala.Exception("Unknown RedisZSetKeyRDD type")
+        }
+      }
+      conn.close()
+      res
+    }.asInstanceOf[Iterator[T]]
+  }
+
+  private def getZSetByScoreWithKey(nodes: Array[RedisNode],
+                                     keys: Iterator[String],
+                                     startScore: Double,
+                                     endScore: Double): Iterator[T] = {
+    groupKeysByNode(nodes, keys).flatMap { case (node, nodeKeys) =>
+      val conn = node.endpoint.connect()
+      val zsetKeys = filterKeysByType(conn, nodeKeys, "zset")
+      val res = {
+        if (classTag[T] == classTag[(String, (String, Double))]) {
+          zsetKeys.map(k => (k, conn.zrangeByScoreWithScores(k, startScore, endScore))).
+            flatMap(kv => kv._2.map(v => (kv._1, (v.getElement, v.getScore)))).iterator
+        } else if (classTag[T] == classTag[String]) {
+          zsetKeys.map(k => (k, conn.zrangeByScore(k, startScore, endScore))).
+            flatMap(kv => kv._2.map(v => (kv._1, v))).iterator
+        } else {
+          throw new scala.Exception("Unknown RedisZSetKeyRDD type")
         }
       }
       conn.close()
@@ -317,6 +366,16 @@ class RedisKeysRDD(sc: SparkContext,
   def getZSetWithScore(): RDD[(String, Double)] = {
     val zsetContext: ZSetContext = new ZSetContext(0, -1, Double.MinValue, Double.MaxValue, true, "byRange")
     new RedisZSetRDD(this, zsetContext, classOf[(String, Double)], readWriteConfig)
+  }
+
+  /**
+    * filter the 'zset' type keys and get all the elements(with scores) of them
+    *
+    * @return RedisZSetRDD[(String, Double)]
+    */
+  def getZSetWithKeyAndScore(): RDD[(String, (String, Double))] = {
+    val zsetContext: ZSetContext = new ZSetContext(0, -1, Double.MinValue, Double.MaxValue, true, "byRangeWithKey")
+    new RedisZSetRDD(this, zsetContext, classOf[(String, (String, Double))], readWriteConfig)
   }
 
   /**
