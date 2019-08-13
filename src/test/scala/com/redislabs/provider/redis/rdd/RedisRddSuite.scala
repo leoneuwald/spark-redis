@@ -51,6 +51,9 @@ trait RedisRddSuite extends SparkRedisSuite with Keys with Matchers {
   }
 
   test("RedisZsetRDD") {
+    val redisZSetWithKeyAndScore = sc.fromRedisZSetWithKeyAndScore("all:words:cnt:sortedset")
+    val zsetWithKeyAndScore = redisZSetWithKeyAndScore.map(_._2).sortByKey().collect
+
     val redisZSetWithScore = sc.fromRedisZSetWithScore("all:words:cnt:sortedset")
     val zsetWithScore = redisZSetWithScore.sortByKey().collect
 
@@ -73,6 +76,8 @@ trait RedisRddSuite extends SparkRedisSuite with Keys with Matchers {
     val wcnts = content.split("\\W+").filter(!_.isEmpty).map((_, 1)).groupBy(_._1).
       map(x => (x._1, x._2.map(_._2).sum.toDouble))
 
+    redisZSetWithKeyAndScore.map(_._1).collect().head should be("all:words:cnt:sortedset")
+    zsetWithKeyAndScore should be(wcnts.toArray.sortBy(_._1))
     zsetWithScore should be(wcnts.toArray.sortBy(_._1))
     zset should be(wcnts.keys.toArray.sorted)
     zrangeWithScore should be(wcnts.toArray.sortBy(x => (x._2, x._1)).take(16))
